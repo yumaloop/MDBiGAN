@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def to_cuda(x):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -108,16 +107,8 @@ class ImageAutoEncoder(nn.Module):
     def _encoder_zc(self, x):
         return self.encoder_zc(x)
 
-    def _decoder(self, zm, zc):
-        z  = torch.cat([zm, zc], dim=1) # z: (batch_size, dim_z)
-        z  = z.view(z.size(0), self.dim_z, 1, 1) # z: (batch_size, dim_z, height, width)
+    def _decoder(self, z):
         return self.decoder(z)
-
-    def _sample_zm(self, num):
-        return torch.randn(num, self.dim_zm).to(device)
-
-    def _sample_zc(self, num):
-        return torch.randn(num, self.dim_zc).to(device)
 
     def forward(self, x):
         """
@@ -125,7 +116,7 @@ class ImageAutoEncoder(nn.Module):
         """
         zm = self._encoder_zm(x) # zm: (batch_size, dim_zm)
         zc = self._encoder_zc(x) # zc: (batch_size, dim_zc)
-        zm_randn = self._sample_zm(x.shape[0]) # z_randn: (batch_size, dim_zm)
-        x_recon_z  = self._decoder(zm, zc) # x_recon: (batch_size, channel, height, width)
-        x_recon_zc = self._decoder(zm_randn, zc)
-        return x_recon_z, x_recon_zc, zc
+        z  = torch.cat([zm, zc], dim=1) # z: (batch_size, dim_z)
+        z  = z.view(z.size(0), self.dim_z, 1, 1) # z: (batch_size, dim_z, height, width)
+        x_recon = self._decoder(z) # x_recon: (batch_size, channel, height, width)
+        return x_recon#, zc
