@@ -5,51 +5,6 @@ import skvideo.io
 import torch
 import torchvision
 
-class WeizmannHumanActionImage(torch.utils.data.Dataset):
-    def __init__(self, 
-                 path="weizmann-human-action", 
-                 trans_label=None,
-                 trans_data=torchvision.transforms.ToTensor(), 
-                 train=True):
-        
-        self.trans_label = trans_label
-        self.trans_data = trans_data
-        self.train = train
-        
-        labelset = []
-        videoset = []
-        dataset = []
-
-        v_id = 0
-        for class_label, class_dir in enumerate(glob.glob(path+"/*")):
-            for file_path in glob.glob(class_dir+"/*.avi"):
-                video = skvideo.io.vread(file_path)
-                for img in video:
-                    img = cv2.resize(img , (96, 96))
-                    labelset.append(class_label)
-                    videoset.append(v_id)
-                    dataset.append(img)
-                v_id += 1
-                    
-        self.labelset = np.array(labelset)
-        self.videoset = np.array(videoset)
-        self.dataset = np.array(dataset)
-        self.datanum = len(dataset)
-
-    def __len__(self):
-        return self.datanum
-
-    def __getitem__(self, idx):
-        out_label = self.labelset[idx]
-        out_id    = self.videoset[idx]
-        out_data  = self.dataset[idx]
-
-        if self.trans_data:
-            out_data = self.trans_data(out_data)
-
-
-        return out_data, out_id, out_label
-
 
 class WeizmannHumanActionVideo(torch.utils.data.Dataset):
     def __init__(self, 
@@ -69,6 +24,7 @@ class WeizmannHumanActionVideo(torch.utils.data.Dataset):
             for filepath in glob.glob(class_dir+"/*.avi"):
                 video = skvideo.io.vread(filepath)
                 video = self.preprocess_video(video, frame_size)
+                video = self.reduce_video_len(video)
                 labelset.append(class_label)
                 dataset.append(video)
 
@@ -85,6 +41,17 @@ class WeizmannHumanActionVideo(torch.utils.data.Dataset):
             video_resize.append(img)
         video_resize = np.array(video_resize).astype(np.float32)
         return video_resize
+
+    def reduce_video_len(self, video, max_len=80):
+        if video.shape[0] >= max_len:
+            video_re=[]
+            for i, img in enumerate(video):
+                if i % 2 == 1:
+                    video_re.append(img)
+            video_re = np.array(video_re)
+        else:
+            video_re = video
+        return video_re
 
     def __len__(self):
         return self.datanum

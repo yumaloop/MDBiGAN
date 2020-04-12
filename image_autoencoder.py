@@ -43,11 +43,11 @@ class ImageAutoEncoder(nn.Module):
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
-            nn.Conv2d(64, 32, 4, 1, 0),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(64, 64, 4, 1, 0),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
-            nn.Conv2d(32, 1, 4, 1, 0),
+            nn.Conv2d(64, 1, 4, 1, 0),
             nn.BatchNorm2d(1),
             nn.LeakyReLU(0.2, inplace=True),
             
@@ -69,11 +69,11 @@ class ImageAutoEncoder(nn.Module):
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
-            nn.Conv2d(64, 32, 4, 1, 0),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(64, 64, 4, 1, 0),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
-            nn.Conv2d(32, 1, 4, 1, 0),
+            nn.Conv2d(64, 1, 4, 1, 0),
             nn.BatchNorm2d(1),
             nn.LeakyReLU(0.2, inplace=True),
             
@@ -100,7 +100,8 @@ class ImageAutoEncoder(nn.Module):
             
             nn.ConvTranspose2d(32, n_channel, 4, 2, 1),
             nn.BatchNorm2d(n_channel),
-            nn.LeakyReLU(0.2, inplace=True)
+            nn.Sigmoid()
+            # nn.LeakyReLU(0.2, inplace=True)
         )
     def _encoder_zm(self, x):
         return self.encoder_zm(x)
@@ -125,7 +126,7 @@ class ImageAutoEncoder(nn.Module):
         """
         zm = self._encoder_zm(x) # zm: (batch_size, dim_zm)
         zc = self._encoder_zc(x) # zc: (batch_size, dim_zc)
-        zm_randn = self._sample_zm(x.shape[0]) # z_randn: (batch_size, dim_zm)
+        # zm_randn = self._sample_zm(x.shape[0]) # z_randn: (batch_size, dim_zm)
         x_recon_z  = self._decoder(zm, zc) # x_recon: (batch_size, channel, height, width)
-        x_recon_zc = self._decoder(zm_randn, zc)
-        return x_recon_z, x_recon_zc, zc
+        # x_recon_zc = self._decoder(zm_randn, zc)
+        return x_recon_z, zm, zc
