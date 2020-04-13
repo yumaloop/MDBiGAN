@@ -33,40 +33,70 @@ class Flatten(nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
 
-
-class Generator(nn.Module):
+class RNN(nn.Module):
     """
-    X' = G(Zc, Zm)
-    Video Generator: (Zc, Zm) → X'
     """
-    def __init__(self, dim_zc=2, dim_zm=2, dim_e=4, n_channels=3, 
+    def __init__(self, dim_zm=2, dim_e=16, n_channels=3, 
                  use_noise=False, device='cuda:0', noise_sigma=None):
         
-        super(VideoGenerator, self).__init__()
+        super(RNN, self).__init__()
         self.n_channels = n_channels
-        self.dim_e = dim_e
-        self.dim_zc = dim_zc
-        self.dim_zm = dim_zm
-        self.dim_z = self.dim_zc + self.dim_zm
-        
+        self.dim_e  = int(dim_e)
+        self.dim_zm = int(dim_zm)
         self.device = device
         
         # LSTM (Recurrent Network)
         self.num_layers = 3
-         self.lstm = nn.LSTM(self.dim_e, 
-                             self.dim_zm,
-                             self.num_layers,
-                             batch_first=True)
+        self.lstm = nn.LSTM(self.dim_e, 
+                            self.dim_zm,
+                            self.num_layers,
+                            batch_first=True)
+
         # e  to zm
         self.zm_to_e = nn.Sequential(
-            nn.Linear(self.dim_zm, self.dim_e)
+            nn.Linear(self.dim_zm, self.dim_e),
             nn.BatchNorm1d(self.dim_e),
             nn.LeakyReLU(0.2, inplace=True)
         )
+
+    def _sample_e(self, batch_size, video_len):
+        e = torch.randn(batch_size, video_len, self.dim_e) 
+        return e.to(self.device)
+        
+    def forward(self, e):
+        """
+        Input
+            e: (batch_size, video_len, dim_e)
+        Output
+            zm: (batch_size, video_len, dim_zm)
+        """
+        batch_size, video_len, _ = e.shape
+
+        # Initialize cell state
+        h0 = torch.zeros(self.num_layers, batch_size, self.dim_zm).to(self.device)
+        c0 = torch.zeros(self.num_layers, batch_size, self.dim_zm).to(self.device)
+        
+        # zm: (batch_size, video_len, dim_zm)
+        zm, (hn, cn) = self.lstm(e, (h0, c0)) 
+        return zm.to(self.device)
+
+
+class Generator(nn.Module):
+    """
+    """
+    def __init__(self, dim_zc=2, dim_zm=2, n_channel=3, 
+                 use_noise=False, device='cuda:0', noise_sigma=None):
+        
+        super(Generator, self).__init__()
+        self.n_channel = n_channel
+        self.dim_zc = dim_zc
+        self.dim_zm = dim_zm
+        self.dim_z = self.dim_zc + self.dim_zm
+        self.device = device
         
         self.generator = nn.Sequential(
             # Noise(use_noise, sigma=noise_sigma),
-            nn.ConvTranspose2d(self.dim_z, 512, 6, 0, 0),
+            nn.ConvTranspose2d(self.dim_z, 512, 6, 1, 0),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
 
@@ -82,75 +112,56 @@ class Generator(nn.Module):
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
-            nn.ConvTranspose2d(64, self.n_channels, 4, 2, 1),
-            nn.BatchNorm2d(self.n_channels),
+            nn.ConvTranspose2d(64, self.n_channel, 4, 2, 1),
+            nn.BatchNorm2d(self.n_channel),
             nn.LeakyReLU(0.2, inplace=True)
         )
-        
-    def _sample_zm(self, batch_size, video_len):
-        """
-        zm: (batch_size, video_len, dim_zm)
-        """
-        # input_e: (batch_size, video_len, dim_e)
-        input_e = torch.randn(batch_size, video_len, self.dim_e) 
-        
-        # Initialize cell state
-        h0 = torch.zeros(self.num_layers, batch_size, self.dim_zm).to(self.device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.dim_zm).to(self.device)
-        
-        # zm: (batch_size, video_len, dim_zm)
-        zm, (hn, cn) = self.lstm(input_e, (h0, c0)) 
-        return zm.to(self.device)
 
     def _sample_zc(self, batch_size, video_len):
         """
-        zc: (batch_size, video_len, dim_zc)
+        Output
+            zc: (batch_size, video_len, dim_zc)
         """
         zc = torch.randn(batch_size, 1, self.dim_zc).repeat(1, video_len, 1)
         return zc.to(device)
 
-    def _sample_z(self, batch_size, video_len):
+    def forward(self, zc, zm):
         """
-        z: (batch_size, video_len, dim_z)
+        Input
+            zc: (batch_size, video_len, dim_zc)
+            zm: (batch_size, video_len, dim_zm)
+        Output
+            v_fake: (batch_size, video_len, channel, height, width)
         """
-        zm = _sample_zm(self, batch_size, video_len) # zm: (batch_size, video_len, dim_zm)
-        zc = _sample_zc(self, batch_size, video_len) # zc: (batch_size, video_len, dim_zc)
         z = torch.cat([zc, zm], dim=2) # z: (batch_size, video_len, dim_z)
-        return z
-    
-    def forward(self, batch_size, video_len):
-        """
-        v_fake: (batch_size, video_len, channel, height, width)
-        """
-        z = _sample_z(batch_size, video_len) # z: (batch_size, video_len, dim_z)
-        z = z.premute(1, 0, 2) # z: (video_len, batch_size, dim_z)
+        z = z.permute(1, 0, 2) # z: (video_len, batch_size, dim_z)
         
-        # zt: (batch_size, dim_z)
+        # zt: (batch_size, dim_z, 1, 1)
         # x_fake: (batch_size, channel, height, width)
-        v_fake = torch.Tensor([x_fake = self.generator(zt) for zt in z]) # x_fake: (video_len, batch_size, channel, height, width)
+        # v_fake: (video_len, batch_size, channel, height, width)
+        v_fake = torch.stack([self.generator(zt.view(-1, self.dim_z, 1, 1)) for zt in z]) 
         v_fake = v_fake.permute(1, 0, 2, 3, 4) # v_fake: (batch_size, video_len, channel, height, width)
         return v_fake.to(self.device) 
 
 
 class ImageDiscriminator(nn.Module):
     """
-    {1, 0} = DI(X)
-    Image Discriminator: {X[i], X'[i]} → {1, 0}
     """
-    def __init__(self, dim_zc=2, dim_zm=2, dim_e=4, n_channels=3, 
+    def __init__(self, dim_zc=2, dim_zm=2, n_channel=3, 
                  use_noise=False, device='cuda:0', noise_sigma=None):
         
         super(ImageDiscriminator, self).__init__()
 
-        self.n_channels = n_channels
+        self.n_channel = n_channel
         self.dim_zc = dim_zc
         self.dim_zm = dim_zm
         self.dim_z = dim_zm + dim_zc
         self.use_noise = use_noise
+        self.device = device
 
         self.image_discriminator = nn.Sequential(
             # Noise(use_noise, sigma=noise_sigma),
-            nn.Conv2d(n_channels, 64, 4, 2, 1),
+            nn.Conv2d(n_channel, 64, 4, 2, 1),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
@@ -163,36 +174,43 @@ class ImageDiscriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             
             nn.Conv2d(256, 1, 4, 2, 1),
+            nn.BatchNorm2d(1),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Flatten(),
+            nn.Linear(36, 1),
             nn.Sigmoid()
         )
     
     def forward(self, x):
         """
-        x: 4D-Tensor (batch_size, channel, height, width)
-        output: (batch_size, 1)
+        Input
+            x: (batch_size, channel, height, width)
+        Output
+            y: (batch_size, 1)
         """
-        output = image_discriminator(x)
-        return output.to(self.device)
+        y = self.image_discriminator(x)
+        return y.to(self.device)
+
 
 class VideoDiscriminator(nn.Module):
     """
-    {1, 0} = DI(X)
-    Image Discriminator: {X[i], X'[i]} → {1, 0}
     """
-    def __init__(self, dim_zc=2, dim_zm=2, dim_e=4, n_channels=3, 
+    def __init__(self, dim_zc=2, dim_zm=2, n_channel=3, 
                  use_noise=False, device='cuda:0', noise_sigma=None):
         
         super(VideoDiscriminator, self).__init__()
 
-        self.n_channels = n_channels
+        self.n_channel = n_channel
         self.dim_zc = dim_zc
         self.dim_zm = dim_zm
         self.dim_z = dim_zm + dim_zc
         self.use_noise = use_noise
+        self.device = device
 
         self.video_discriminator = nn.Sequential(
             # Noise(use_noise, sigma=noise_sigma),
-            nn.Conv3d(n_channels, 64, 4, 1, 0),
+            nn.Conv3d(n_channel, 64, 4, 1, 0),
             nn.BatchNorm3d(64),
             nn.LeakyReLU(0.2, inplace=True),
             
@@ -205,13 +223,21 @@ class VideoDiscriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             
             nn.Conv3d(256, 1, 4, 1, 0),
+            nn.BatchNorm3d(1),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Flatten(),
+            nn.Linear(28224, 1),
             nn.Sigmoid()
         )
     
     def forward(self, x):
         """
-        x: 5D-Tensor (batch_size, video_len, channel, height, width)
-        output: (batch_size, 1)
+        Input
+            x: (batch_size, video_len, channel, height, width)
+        Output
+            y: (batch_size, 1)
         """
-        output = video_discriminator(x)
-        return output.to(self.device)
+        x = x.permute(0, 2, 1, 3, 4)
+        y = self.video_discriminator(x)
+        return y.to(self.device)
